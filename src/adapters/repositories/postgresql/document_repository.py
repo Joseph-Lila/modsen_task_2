@@ -37,16 +37,9 @@ class DocumentRepository(AbstractRepository):
             stmt = select(Document).options(immediateload(Document.rubrics))
             items = await session.scalars(stmt)
 
-        pool = Pool()
-        results = [
-            pool.apply_async(parse_orm_doc_to_entity, [item])
-            for item in items
-        ]
-        pool.close()
-        pool.join()
-
-        # each process returned result as AsyncResult
-        results = [res.get() for res in results]
+        # let's parse items parallely
+        with Pool() as pool:
+            results = pool.map(parse_orm_doc_to_entity, items)
 
         return results
 

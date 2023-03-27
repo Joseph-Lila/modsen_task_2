@@ -1,4 +1,5 @@
 """ Module srс.adapters.repositories.postgresql """
+from multiprocessing import Pool
 from typing import List, Optional
 
 from sqlalchemy import delete, select
@@ -9,6 +10,16 @@ from src.adapters.orm import (Document, DocumentRubric, Rubric,
                               async_session_factory)
 from src.adapters.repositories import AbstractRepository
 from src.domain.entities import Document as DocumentEntity
+
+
+def parse_orm_doc_to_entity(item: Document) -> DocumentEntity:
+    new_item = DocumentEntity(
+        id=item.id,
+        text=item.text,
+        rubrics=[rubric.value for rubric in item.rubrics],
+        created_date=item.created_date,
+    )
+    return new_item
 
 
 class DocumentRepository(AbstractRepository):
@@ -25,16 +36,19 @@ class DocumentRepository(AbstractRepository):
         async with self.async_session() as session:
             stmt = select(Document).options(immediateload(Document.rubrics))
             items = await session.scalars(stmt)
-        answer = [
-            DocumentEntity(
-                id=item.id,
-                text=item.text,
-                rubrics=[rubric.value for rubric in item.rubrics],
-                created_date=item.created_date,
-            )
+
+        pool = Pool()
+        results = [
+            pool.apply_async(parse_orm_doc_to_entity, [item])
             for item in items
         ]
-        return answer
+        pool.close()
+        pool.join()
+
+        # each process returned result as AsyncResult
+        results = [res.get() for res in results]
+
+        return results
 
     async def get_by_id(self, id_) -> Optional[DocumentEntity]:
         """
@@ -46,12 +60,7 @@ class DocumentRepository(AbstractRepository):
             stmt = select(Document).filter_by(id=id_).options(immediateload(Document.rubrics))
             result = await session.scalar(stmt)
         if result is not None:
-            result = DocumentEntity(
-                id=result.id,
-                text=result.text,
-                rubrics=[rubric.value for rubric in result.rubrics],
-                created_date=result.created_date,
-            )
+            result = parse_orm_doc_to_entity(result)
         return result
 
     async def create(self, item: DocumentEntity):
